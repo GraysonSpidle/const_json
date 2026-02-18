@@ -165,8 +165,10 @@ auto v = const_json::parse<ExampleSchema3>(someIStream);
 // as opposed to ExampleSchema's std::variant<std::string, intmax_t>
 ```
 > [!Note]
-> You should *not* use names for the types within the `Variant`, the library will ignore them. The only name that matters is the one for the `Variant`.
-> Also don't use these within `Array`s, because `Array` already has this functionality built into it.
+> You can use names for the alternatives within the `Variant`, the library will mostly ignore them except for when you're using `get_member_schema`. Otherwise, the only name that matters is the one for the `Variant`.
+
+> [!Note]
+> Don't use `Variant` within `Array`s, because `Array` already has this functionality built into it.
 
 ### Support for wider chars
 Support for different char types depends on `std`'s support for them. If `std` supports them, then this will too. You can change the library's char type by changing the `chartype` type alias which is located at the top of the `const_json` namespace definition.
