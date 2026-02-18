@@ -12,6 +12,7 @@
 #pragma warning(disable: 4711, justification: "sanity") // tells you something was inlined
 
 #ifndef SPIDLE_CONST_JSON_USING
+// A convenience macro to make the schema creation process less of a pain
 #define SPIDLE_CONST_JSON_USING using const_json::Bool; \
 using const_json::Bool_; \
 using const_json::Array; \
@@ -44,8 +45,11 @@ using const_json::Variant;
 #include <ostream>
 
 namespace const_json {
+	// The char dtype the library uses for strings, streams, and error details.
+	// Change this if you wish for the library to accomodate wider char types.
 	using chartype = char;
 
+	// Identifiers for each token type
 	enum class JsonTokens : uint8_t {
 		Error = 0x0,
 		Bool = 0x1,
@@ -91,6 +95,7 @@ namespace const_json {
 		};
 	}
 
+	// Anything in this namespace is supposed to be private.
 	namespace util {
 		template <size_t N> requires (N > 0)
 		struct StringLiteral {
@@ -349,14 +354,12 @@ namespace const_json {
 
 			using _unpacked = typename T::template pipe_to<_unpack>;
 
-			using value = std::conditional_t<(_unpacked::size > 1), typename _unpacked::template pipe_to<std::variant>, typename _unpacked::template at<0>::value>;
+			using value = std::conditional_t<(_unpacked::size > 1),
+				typename _unpacked::template pipe_to<std::variant>,
+				typename _unpacked::template at<0>::value>;
 			using value_variant = _unpacked::template pipe_to<std::variant>;
 		};
 
-
-		template <util::is_const_json_type... Ts>
-		struct count_uniques : std::integral_constant<size_t, tppack<Ts...>::template unique<compare_rettype>::value::size> {};
-		
 		template <typename T>
 		constexpr T max(std::initializer_list<T>&& list) {
 			T num = *list.begin();
@@ -502,7 +505,6 @@ namespace const_json {
 		template <typename rettype>
 		struct ReadFunction_t {
 			using raw_t = void(*)(rettype&, std::basic_istream<chartype>&);
-			//std::reference_wrapper<const raw_t> func;
 			raw_t func;
 
 			constexpr ReadFunction_t(raw_t func) : func(func) {}
@@ -513,6 +515,7 @@ namespace const_json {
 		template <Formatting, int, typename>
 		struct build_variant_write_func {};
 
+		// std::variant only has 1 alternative
 		template <Formatting fmt, int depth, template <util::is_const_json_type...> class Template, util::is_const_json_type T>
 		struct build_variant_write_func<fmt, depth, Template<T>> {
 			template <typename rettype> requires (!util::specialization_of<std::variant, rettype>)
@@ -527,6 +530,7 @@ namespace const_json {
 			}
 		};
 
+		// std::variant has 2+ alternatives
 		template <Formatting fmt, int depth, template <util::is_const_json_type...> class Template, util::is_const_json_type... Ts> requires (sizeof...(Ts) > 1)
 		struct build_variant_write_func<fmt, depth, Template<Ts...>> {
 			template <class... Ts2>
@@ -540,6 +544,7 @@ namespace const_json {
 			template <class rettype> requires util::specialization_of<std::variant, rettype>
 			static void write(const rettype& toBeWritten, std::basic_ostream<chartype>& os) {
 				basic_visitor_t visitor {
+					// Yeah that's right, pack expansion with lambdas baby!
 					[&](const util::get_rettype<Ts>& r2) -> void { Ts::template write<fmt, depth>(r2, os); }...
 				};
 				std::visit(visitor, toBeWritten);
@@ -750,11 +755,27 @@ namespace const_json {
 		template <class _> requires (util::is_array_or_object<T> or (T::token == JsonTokens::Variant))
 		struct _get_helpers<_> {
 			using helper = typename T::helper;
-			using deduped = typename T::deduped; //typename helper::template unique<util::compare_rettype>;
+			using deduped = typename T::deduped;
 		};
+
 		using helper = typename _get_helpers<void>::helper;
 		using deduped = typename _get_helpers<void>::deduped;
+
+		template <class>
+		struct _get_obj_variant_specifics {
+			template <util::StringLiteral memberName>
+			using get = void;
+		};
+
+		template <class _> requires (T::token == JsonTokens::Object or T::token == JsonTokens::Variant)
+		struct _get_obj_variant_specifics<_> {
+			template <util::StringLiteral memberName>
+			using get = T::template get<memberName>;
+		};
 		
+		template <util::StringLiteral memberName>
+		using get = typename _get_obj_variant_specifics<void>::template get<memberName>;
+
 		template <typename Parent>
 		static void read(Parent& out, std::basic_istream<chartype>& is) { T::template read<Parent>(out, is); }
 
@@ -775,6 +796,26 @@ namespace const_json {
 		using rettype = typename util::build_rettype<typename deduped::value>::value_variant;
 		static constexpr JsonTokens token = JsonTokens::Variant;
 		static constexpr bool isOptional = false;
+
+		template <util::StringLiteral memberName>
+		static constexpr bool contains_name = util::any_of<(Ts::name == memberName.toStringView())...>;
+
+		template <util::StringLiteral name> requires (contains_name<name>)
+		struct _get_impl {
+			template <class T, class... Ts2>
+			struct _impl { using value = typename _impl<Ts2...>::value; };
+
+			template <class T, class... Ts2> requires (T::name == name.toStringView())
+			struct _impl<T, Ts2...> { using value = T; };
+
+			template <class T>
+			struct _impl<T> { using value = T; };
+
+			using value = typename _impl<Ts...>::value;
+		};
+
+		template <util::StringLiteral memberName>
+		using get = typename _get_impl<memberName>::value;
 
 		static inline util::ReadFunction_t<rettype> readFunctions[sizeof...(Ts)] = { Ts::template read<rettype>... };
 
@@ -1093,34 +1134,30 @@ namespace const_json {
 	using Array_ = Array<"", Ts...>;
 	static_assert(util::is_const_json_type<Array_<Int_, String_, Double_, Bool_, Int_>>, "Array is non-conforming");
 
-	using Test = typename Optional<Array<"Test", Int_, String_, Int_>>::rettype;
-
 // ===========================================================================================================================================
 
-	template <util::is_const_json_type Schema, util::StringLiteral memberName> requires (Schema::token == JsonTokens::Object) and (Schema::template contains_name<memberName>)
-	using get_rettype = typename Schema::template get<memberName>::rettype;
+	template <util::is_const_json_type RootSchema, util::StringLiteral... memberNames> requires (RootSchema::token == JsonTokens::Object or RootSchema::token == JsonTokens::Variant) and (0 < sizeof...(memberNames))
+	struct get_member_schema {
+		template <util::is_const_json_type Schema, util::StringLiteral memberName, util::StringLiteral... theRest>
+		struct _impl {
+			using NextSchema = Schema::template get<memberName>;
+			using value = typename _impl<NextSchema, theRest...>::value;
+		};
 
-	template <util::is_const_json_type Schema, util::StringLiteral memberName> requires (Schema::token == JsonTokens::Object) and (Schema::template contains_name<memberName>)
-	get_rettype<Schema, memberName>& get(typename Schema::rettype& arg) {
-		auto key = std::basic_string(memberName.toStringView());
-		if constexpr (util::specialization_of<std::variant, typename Schema::rettype_value_type>) {
-			return std::get<get_rettype<Schema, memberName>>(arg[key]);
-		}
-		else {
-			return arg[key];
-		}
+		template <util::is_const_json_type Schema, util::StringLiteral memberName>
+		struct _impl<Schema, memberName> {
+			using value = Schema::template get<memberName>;
+		};
+
+		using value = typename _impl<RootSchema, memberNames...>::value;
+	};
+
+	template <util::is_const_json_type RootSchema, util::StringLiteral memberNames> requires (RootSchema::token == JsonTokens::Object or RootSchema::token == JsonTokens::Variant)
+	typename get_member_schema<RootSchema, memberNames>::rettype& getMember(typename RootSchema::rettype& arg) {
+		return _build_member_getter<RootSchema, memberNames>()(arg);
 	}
 
-	template <util::is_const_json_type Schema, util::StringLiteral memberName> requires (Schema::token == JsonTokens::Object) and (Schema::template contains_name<memberName>)
-	const get_rettype<Schema, memberName>& get(const typename Schema::rettype& arg) {
-		auto key = std::basic_string(memberName.toStringView());
-		if constexpr (util::specialization_of<std::variant, typename Schema::rettype_value_type>)
-			return std::get<get_rettype<Schema, memberName>>(arg.at(key));
-		else {
-			return arg.at(key);
-		}
-	}
-
+	// Reads the given istream as JSON
 	template <util::is_const_json_type Schema>
 	typename Schema::rettype parse(std::basic_istream<chartype>& is) {
 		typename Schema::rettype out;
@@ -1128,12 +1165,14 @@ namespace const_json {
 		return out;
 	}
 
+	// Writes the given Schema rettype to the given ostream according to the given formatting
 	template <util::is_const_json_type Schema, Formatting formatting = Minified>
 	void dump(const typename Schema::rettype& toBeWritten, std::basic_ostream<chartype>& os) {
 		constexpr int initialDepth = 0;
 		Schema::template write<formatting, initialDepth>(toBeWritten, os);
 	}
 
+	// Writes the given Schema rettype to a string according to the given formatting
 	template <util::is_const_json_type Schema, Formatting formatting = Minified>
 	std::basic_string<chartype> dump(const typename Schema::rettype& toBeWritten) {
 		std::basic_ostringstream<chartype> oss;

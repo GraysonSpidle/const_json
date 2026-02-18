@@ -1,5 +1,5 @@
+// This file contains tests for the const_json library
 #include "const_json.h"
-//#include "generic_json.h"
 
 #include <iostream>
 #include <typeinfo>
@@ -21,8 +21,6 @@ int main() {
 		ComplicatedObject,
 		Optional<Double<"willNotBeThere">>
 	>;
-
-	typename JsonSchema::rettype::value_type::second_type s;
 
 	std::istringstream iss{ stuff };
 	typename JsonSchema::rettype v2;
@@ -66,8 +64,8 @@ int main() {
 
 	// Example of doing something with an object member in the result
 
-	auto onemore = std::get<typename ComplicatedObject::rettype>(v2["onemore"]);
-	auto innerObj = std::get<typename InnerObject::rettype>(onemore["innerObject"]);
+	auto& onemore = std::get<typename const_json::get_member_schema<JsonSchema, "onemore">::value::rettype>(v2["onemore"]);
+	auto& innerObj = std::get<typename InnerObject::rettype>(onemore["innerObject"]);
 	innerObj["id"] = 1234;
 	auto innerArray = std::get<typename InnerArray::rettype>(onemore["innerArray"]);
 	for (auto it = innerArray.begin(); it != innerArray.end(); ++it) {
@@ -89,6 +87,8 @@ int main() {
 	std::cout << oss.str() << std::endl;
 
 	std::cout << "\n\n" << std::endl;
+
+// ==========================================================================================================================================================
 
 	using EmployeePersonVehicleDetailsSchema = Object_<String<"vehicleMake">, String<"vehicleModel">, String<"vehicleYear">, String<"vehicleAddDate">, String<"vehicleRemoveDate">, String<"vehicleRegNo">>;
 	using EmployeePersonAutoInsurancePolicySchema = Object_<String<"autoInsurancePolicyId">, String<"autoInsuranceCarrierName">, String<"autoInsuranceHolderName">, String<"autoInsurancePolicyStartDate">, String<"autoInsurancePolicyExpDate">>;
@@ -134,7 +134,7 @@ int main() {
 
 	auto employeeArray = std::get<typename EmployeeArraySchema::rettype>(prism["employee"]);
 	auto employee = employeeArray[0];
-	auto id = std::get<const_json::get_rettype<EmployeeEmployeeSchema, "id">>(employee["id"]);
+	auto id = employee["id"];
 
 	std::ostringstream oss2;
 
