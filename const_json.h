@@ -1152,11 +1152,6 @@ namespace const_json {
 		using value = typename _impl<RootSchema, memberNames...>::value;
 	};
 
-	template <util::is_const_json_type RootSchema, util::StringLiteral memberNames> requires (RootSchema::token == JsonTokens::Object or RootSchema::token == JsonTokens::Variant)
-	typename get_member_schema<RootSchema, memberNames>::rettype& getMember(typename RootSchema::rettype& arg) {
-		return _build_member_getter<RootSchema, memberNames>()(arg);
-	}
-
 	// Reads the given istream as JSON
 	template <util::is_const_json_type Schema>
 	typename Schema::rettype parse(std::basic_istream<chartype>& is) {
