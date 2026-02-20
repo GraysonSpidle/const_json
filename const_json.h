@@ -83,8 +83,8 @@ namespace const_json {
 		struct BadTypeError {
 			std::reference_wrapper<const std::type_info> expected;
 			std::basic_string<chartype> path;
-			
-			BadTypeError(const std::basic_string<chartype>& path, const std::type_info& info) : expected(info),  path(path) {}
+
+			BadTypeError(const std::basic_string<chartype>& path, const std::type_info& info) : expected(info), path(path) {}
 		};
 		// The given JSON is incorrect
 		struct MalformedInputError {};
@@ -565,7 +565,99 @@ namespace const_json {
 				}
 			}
 		}
+	}
 
+	// Yields the schema of the member located at the end of the path specified by memberNames.
+	template <util::is_const_json_type RootSchema, util::StringLiteral... memberNames> requires (RootSchema::token == JsonTokens::Object or RootSchema::token == JsonTokens::Variant) and (0 < sizeof...(memberNames))
+	struct get_member_schema {
+		template <util::is_const_json_type Schema, util::StringLiteral memberName, util::StringLiteral... theRest>
+		struct _impl {
+			using NextSchema = Schema::template get<memberName>;
+			using value = typename _impl<NextSchema, theRest...>::value;
+		};
+
+		template <util::is_const_json_type Schema, util::StringLiteral memberName>
+		struct _impl<Schema, memberName> {
+			using value = Schema::template get<memberName>;
+		};
+
+		using value = typename _impl<RootSchema, memberNames...>::value;
+	};
+
+	namespace util {
+		template <is_const_json_type RootSchema, StringLiteral memberName, StringLiteral... additionalMemberNames>
+		struct build_member_getter {
+			using rettype = typename get_member_schema<RootSchema, memberName, additionalMemberNames...>::value::rettype;
+
+			rettype& operator()(typename RootSchema::rettype& arg) const {
+				using Schema = typename get_member_schema<RootSchema, memberName>::value;
+				auto getter1 = build_member_getter<RootSchema, memberName>();
+				auto getter2 = build_member_getter<Schema, additionalMemberNames...>();
+				return getter2(getter1(arg));
+			}
+
+			const rettype& operator()(const typename RootSchema::rettype& arg) const {
+				using Schema = typename get_member_schema<RootSchema, memberName>::value;
+				auto getter1 = build_member_getter<RootSchema, memberName>();
+				auto getter2 = build_member_getter<Schema, additionalMemberNames...>();
+				return getter2(getter1(arg));
+			}
+		};
+
+		template <is_const_json_type RootSchema, StringLiteral memberName>
+		struct build_member_getter<RootSchema, memberName> {
+			using rettype = typename get_member_schema<RootSchema, memberName>::value::rettype;
+
+			rettype& operator()(typename RootSchema::rettype& arg) const {
+				if constexpr (RootSchema::token == JsonTokens::Object) {
+					auto key = std::basic_string(memberName.toStringView());
+					assert(std::find(std::begin(arg), std::end(arg), key) != std::end(arg));
+
+					if constexpr (specialization_of<std::variant, RootSchema::rettype_value_type>)
+						return std::get<rettype>(arg[key]);
+					else
+						return arg[key];
+				}
+				else if constexpr (RootSchema::token == JsonTokens::Variant) {
+					assert(std::holds_alternative<rettype>(arg));
+					return std::get<rettype>(arg);
+				}
+				else {
+					abort(); // TODO
+				}
+			}
+
+			const rettype& operator()(const typename RootSchema::rettype& arg) const {
+				if constexpr (RootSchema::token == JsonTokens::Object) {
+					auto key = std::basic_string(memberName.toStringView());
+					assert(std::find(std::cbegin(arg), std::cend(arg), key) != std::cend(arg));
+
+					if constexpr (specialization_of<std::variant, RootSchema::rettype_value_type>)
+						return std::get<rettype>(arg.at(key));
+					else
+						return arg.at(key);
+				}
+				else if constexpr (RootSchema::token == JsonTokens::Variant) {
+					assert(std::holds_alternative<rettype>(arg));
+					return std::get<rettype>(arg); // TODO possible compiler error here due to const-nesss
+				}
+				else {
+					abort(); // TODO
+				}
+			}
+		};
+	}
+
+	// Using RootSchema as the base, this gets the member specified by the memberNames "path"
+	template <util::is_const_json_type RootSchema, util::StringLiteral... memberNames>
+	typename get_member_schema<RootSchema, memberNames...>::value::rettype& getMember(typename RootSchema::rettype& arg) {
+		return util::build_member_getter<RootSchema, memberNames...>()(arg);
+	}
+
+	// Using RootSchema as the base, this gets the member specified by the memberNames "path"
+	template <util::is_const_json_type RootSchema, util::StringLiteral... memberNames>
+	const typename get_member_schema<RootSchema, memberNames...>::value::rettype& getMember(const typename RootSchema::rettype& arg) {
+		return util::build_member_getter<RootSchema, memberNames...>()(arg);
 	}
 
 //	============================================================================================================
@@ -1135,22 +1227,6 @@ namespace const_json {
 	static_assert(util::is_const_json_type<Array_<Int_, String_, Double_, Bool_, Int_>>, "Array is non-conforming");
 
 // ===========================================================================================================================================
-
-	template <util::is_const_json_type RootSchema, util::StringLiteral... memberNames> requires (RootSchema::token == JsonTokens::Object or RootSchema::token == JsonTokens::Variant) and (0 < sizeof...(memberNames))
-	struct get_member_schema {
-		template <util::is_const_json_type Schema, util::StringLiteral memberName, util::StringLiteral... theRest>
-		struct _impl {
-			using NextSchema = Schema::template get<memberName>;
-			using value = typename _impl<NextSchema, theRest...>::value;
-		};
-
-		template <util::is_const_json_type Schema, util::StringLiteral memberName>
-		struct _impl<Schema, memberName> {
-			using value = Schema::template get<memberName>;
-		};
-
-		using value = typename _impl<RootSchema, memberNames...>::value;
-	};
 
 	// Reads the given istream as JSON
 	template <util::is_const_json_type Schema>

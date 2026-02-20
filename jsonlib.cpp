@@ -47,7 +47,7 @@ int main() {
 
 	// Example of doing something with an array member in the result
 
-	auto testArray = std::get<typename ComplicatedArray::rettype>(v2["test"]);
+	auto testArray = const_json::getMember<JsonSchema, "test">(v2);
 	for (auto it = testArray.begin(); it != testArray.end(); ++it) {
 		if (std::holds_alternative<intmax_t>(*it)) {
 			std::cout << std::get<intmax_t>(*it) << std::endl;
@@ -64,10 +64,9 @@ int main() {
 
 	// Example of doing something with an object member in the result
 
-	auto& onemore = std::get<typename const_json::get_member_schema<JsonSchema, "onemore">::value::rettype>(v2["onemore"]);
-	auto& innerObj = std::get<typename InnerObject::rettype>(onemore["innerObject"]);
-	innerObj["id"] = 1234;
-	auto innerArray = std::get<typename InnerArray::rettype>(onemore["innerArray"]);
+	auto& id = const_json::getMember<JsonSchema, "onemore", "innerObject", "id">(v2);
+	id = 1234;
+	auto& innerArray = const_json::getMember<JsonSchema, "onemore", "innerArray">(v2);
 	for (auto it = innerArray.begin(); it != innerArray.end(); ++it) {
 		*it = 5;
 	}
@@ -132,9 +131,7 @@ int main() {
 
 	std::cout << "\n\n" << std::endl;
 
-	auto employeeArray = std::get<typename EmployeeArraySchema::rettype>(prism["employee"]);
-	auto employee = employeeArray[0];
-	auto id = employee["id"];
+	auto& employeeArray = const_json::getMember<EmployeeSchema, "employee">(prism);
 
 	std::ostringstream oss2;
 
