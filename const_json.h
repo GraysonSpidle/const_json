@@ -339,7 +339,7 @@ namespace const_json {
 			struct _dummy : std::bool_constant<L::helper::template set_symmetric_difference_pack<compare_rettype, typename R::helper>::value::size == 0> {};//std::bool_constant<all_of<L::helper::template contains<compare_rettype, RArgs>::value...>> {};
 
 			template <class... LArgs>
-			struct _dummy2 {};//: std::bool_constant<all_of<R::helper::template contains<compare_rettype, LArgs>::value...>> {};
+			struct _dummy2 {};
 
 			static constexpr bool value = (L::token == R::token) and (0 == L::helper::template set_symmetric_difference_pack<compare_rettype, typename R::helper>::value::size);
 		};
@@ -584,6 +584,9 @@ namespace const_json {
 		using value = typename _impl<RootSchema, memberNames...>::value;
 	};
 
+	template <util::is_const_json_type RootSchema, util::StringLiteral... memberNames>
+	using get_member_schema_t = typename get_member_schema<RootSchema, memberNames...>::value;
+
 	namespace util {
 		template <is_const_json_type RootSchema, StringLiteral memberName, StringLiteral... additionalMemberNames>
 		struct build_member_getter {
@@ -650,13 +653,13 @@ namespace const_json {
 
 	// Using RootSchema as the base, this gets the member specified by the memberNames "path"
 	template <util::is_const_json_type RootSchema, util::StringLiteral... memberNames>
-	typename get_member_schema<RootSchema, memberNames...>::value::rettype& getMember(typename RootSchema::rettype& arg) {
+	typename get_member_schema_t<RootSchema, memberNames...>::rettype& getMember(typename RootSchema::rettype& arg) {
 		return util::build_member_getter<RootSchema, memberNames...>()(arg);
 	}
 
 	// Using RootSchema as the base, this gets the member specified by the memberNames "path"
 	template <util::is_const_json_type RootSchema, util::StringLiteral... memberNames>
-	const typename get_member_schema<RootSchema, memberNames...>::value::rettype& getMember(const typename RootSchema::rettype& arg) {
+	const typename get_member_schema_t<RootSchema, memberNames...>::rettype& getMember(const typename RootSchema::rettype& arg) {
 		return util::build_member_getter<RootSchema, memberNames...>()(arg);
 	}
 
@@ -834,8 +837,8 @@ namespace const_json {
 	template <util::is_const_json_type T>
 	struct Optional {
 		static constexpr auto name = T::name;
-		using rettype = typename T::rettype;
 		static constexpr JsonTokens token = T::token;
+		using rettype = typename T::rettype;
 		static constexpr bool isOptional = true;
 
 		template <class>
@@ -864,9 +867,17 @@ namespace const_json {
 			template <util::StringLiteral memberName>
 			using get = T::template get<memberName>;
 		};
-		
+
 		template <util::StringLiteral memberName>
 		using get = typename _get_obj_variant_specifics<void>::template get<memberName>;
+
+		template <class>
+		struct _get_element_schema { using value = void; };
+
+		template <class _> requires (_::token == JsonTokens::Object or _::token == JsonTokens::Array)
+		struct _get_element_schema<_> { using value = typename _::element_schema; };
+
+		using element_schema = typename _get_element_schema<T>::value;
 
 		template <typename Parent>
 		static void read(Parent& out, std::basic_istream<chartype>& is) { T::template read<Parent>(out, is); }
@@ -876,7 +887,7 @@ namespace const_json {
 	};
 	static_assert(util::is_const_json_type<Optional<String<"test">>>, "Optional is non-conforming");
 
-	template <util::StringLiteral _name, util::is_const_json_type... Ts>
+	template <util::StringLiteral _name, util::is_const_json_type... Ts> requires (0 < sizeof...(Ts))
 	struct Variant {
 		static constexpr auto name = _name.toStringView();
 		static_assert(name.size() > 1, "Variant name cannot be empty, if you are using this in an Array, don't. Just add more types to the Array.");
@@ -947,16 +958,17 @@ namespace const_json {
 	};
 	static_assert(util::is_const_json_type<Variant<"blah", Int_, String_, Double_>>, "Variant is non-conforming");
 
-	template <util::StringLiteral _name, util::is_const_json_type... Ts> requires util::all_of<(Ts::name.size() != 0)...>
+	template <util::StringLiteral _name, util::is_const_json_type... Ts> requires (0 < sizeof...(Ts)) and util::all_of<(Ts::name.size() != 0)...>
 	struct Object {
 		static constexpr auto name = _name.toStringView();
+		static constexpr JsonTokens token = JsonTokens::Object;
 		// This is necessary because the compiler won't accept an Object as a class template parameter due to the StringLiteral
 		using helper = util::tppack<Ts...>;
 
 		using deduped = helper::template unique<util::compare_rettype>;
 		using rettype = std::map<std::basic_string<chartype>, typename util::build_rettype<typename deduped::value>::value>;
 		using rettype_value_type = typename rettype::value_type::second_type;
-		static constexpr JsonTokens token = JsonTokens::Object;
+		using element_schema = std::conditional_t<(deduped::value::size > 1), Variant<"element", Ts...>, typename deduped::value::template at<0>::value>;
 		static constexpr bool isOptional = false;
 
 		static inline util::ReadFunction_t<rettype_value_type> readFunctions[sizeof...(Ts)] = { Ts::template read<rettype_value_type>... };
@@ -1127,14 +1139,15 @@ namespace const_json {
 	using Object_ = Object<"", Ts...>;
 	static_assert(util::is_const_json_type<Object_<Int<"1">, String<"2">, Double<"3">, Bool<"4">, Int<"5">>>, "Object is non-conforming");
 
-	template <util::StringLiteral _name, util::is_const_json_type... Ts>
+	template <util::StringLiteral _name, util::is_const_json_type... Ts> requires (0 < sizeof...(Ts))
 	struct Array {
 		static constexpr auto name = _name.toStringView();
+		static constexpr JsonTokens token = JsonTokens::Array;
 		using helper = util::tppack<Ts...>;
 
 		using deduped = helper::template unique<util::compare_rettype>;
 		using rettype = std::vector<typename util::build_rettype<typename deduped::value>::value>;
-		static constexpr JsonTokens token = JsonTokens::Array;
+		using element_schema = std::conditional_t<(deduped::value::size > 1), Variant<"element", Ts...>, typename deduped::value::template at<0>::value>;
 		static constexpr bool isOptional = false;
 
 		static inline util::ReadFunction_t<typename rettype::value_type> readFunctions[sizeof...(Ts)] = { Ts::template read<typename rettype::value_type>... };

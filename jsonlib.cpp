@@ -11,13 +11,13 @@ int main() {
 
 	SPIDLE_CONST_JSON_USING;
 
-	using ComplicatedArray = Array<"test", Int_, String_, Double_, Int_>;
+	using ComplicatedArray = Array<"test", Int_, String_, Double_, Int<"thisWillBeRemoved">>;
 	using InnerObject = Object<"innerObject", Int<"id">>;
 	using InnerArray = Array<"innerArray", Int_>;
 	using ComplicatedObject = Object<"onemore", InnerObject, InnerArray>;
 	using JsonSchema = Object_<
 		ComplicatedArray,
-		Variant<"another", Bool_>,
+		Variant<"another", Bool<"bool">>,
 		ComplicatedObject,
 		Optional<Double<"willNotBeThere">>
 	>;
@@ -67,9 +67,15 @@ int main() {
 	auto& id = const_json::getMember<JsonSchema, "onemore", "innerObject", "id">(v2);
 	id = 1234;
 	auto& innerArray = const_json::getMember<JsonSchema, "onemore", "innerArray">(v2);
+	static_assert(std::same_as<Int_::rettype, typename const_json::get_member_schema_t<JsonSchema, "onemore", "innerArray">::element_schema::rettype>);
 	for (auto it = innerArray.begin(); it != innerArray.end(); ++it) {
 		*it = 5;
 	}
+
+	// Example of using named alternatives in Variant
+
+	auto& b = const_json::getMember<JsonSchema, "another", "bool">(v2);
+	b = !b;
 
 	// Writing it all to a string
 
@@ -132,12 +138,15 @@ int main() {
 	std::cout << "\n\n" << std::endl;
 
 	auto& employeeArray = const_json::getMember<EmployeeSchema, "employee">(prism);
+	for (auto it = std::begin(employeeArray); it != std::end(employeeArray); ++it) {
+		using Schema = typename const_json::get_member_schema<EmployeeSchema, "employee">::value::element_schema;
+		auto& id2 = const_json::getMember<Schema, "id">(*it);
+		id2 = "And now for something completely different";
+	}
 
-	std::ostringstream oss2;
+	const_json::dump<EmployeeSchema, fmt>(prism, std::cout);
 
-	const_json::dump<EmployeeSchema, fmt>(prism, oss2);
-
-	std::cout << oss2.str() << std::endl;
+	std::cout << std::endl;
 
 	return 0;
 }
