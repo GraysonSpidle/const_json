@@ -41,12 +41,10 @@ int main() {
 	using ComplicatedObject = Object<"onemore", InnerObject, InnerArray>;
 	using JsonSchema = Object_<
 		ComplicatedArray,
-		Variant<"another", Bool_, Int_>,
+		Variant<"another", Bool_>,
 		ComplicatedObject,
 		Optional<Double<"willNotBeThere">>
 	>;
-
-	typename JsonSchema::rettype::value_type::second_type s;
 
 	std::istringstream iss{ stuff };
 	typename JsonSchema::rettype v2;
@@ -54,7 +52,7 @@ int main() {
 		v2 = const_json::parse<JsonSchema>(iss);
 	}
 	catch (const_json::err::NotAllMembersPresentError& e) {
-		std::cout << "Not all members were present!" << std::endl;
+		std::cout << "Not all members are present!" << std::endl;
 		std::cout << e.path << std::endl;
 		for (auto it = e.membersAbsent.begin(); it != e.membersAbsent.end(); ++it) {
 			std::cout << '\t' << *it << std::endl;
@@ -63,7 +61,7 @@ int main() {
 	}
 	catch (const_json::err::BadTypeError& e) {
 		std::cout << "Unexpected type for " << e.path << std::endl;
-		std::cout << "Expected: " << e.expected.name() << std::endl;
+		std::cout << "Expected: " << e.expected.get().name() << " (you might have to unmangle this)" << std::endl;
 		return 1;
 	}
 	catch (const_json::err::MalformedInputError) {
@@ -73,7 +71,7 @@ int main() {
 
 	// Example of doing something with an array member in the result
 
-	auto testArray = std::get<typename ComplicatedArray::rettype>(v2["test"]);
+	auto testArray = const_json::getMember<JsonSchema, "test">(v2);
 	for (auto it = testArray.begin(); it != testArray.end(); ++it) {
 		if (std::holds_alternative<intmax_t>(*it)) {
 			std::cout << std::get<intmax_t>(*it) << std::endl;
@@ -90,15 +88,15 @@ int main() {
 
 	// Example of doing something with an object member in the result
 
-	auto onemore = std::get<typename ComplicatedObject::rettype>(v2["onemore"]);
-	auto innerObj = std::get<typename InnerObject::rettype>(onemore["innerObject"]);
-	innerObj["id"] = 1234;
-	auto innerArray = std::get<typename InnerArray::rettype>(onemore["innerArray"]);
+	auto& id = const_json::getMember<JsonSchema, "onemore", "innerObject", "id">(v2);
+	id = 1234;
+	auto& innerArray = const_json::getMember<JsonSchema, "onemore", "innerArray">(v2);
 	for (auto it = innerArray.begin(); it != innerArray.end(); ++it) {
 		*it = 5;
 	}
 
 	// Writing it all to a string
+
 	constexpr const_json::Formatting fmt = const_json::Formatting {
 		const_json::Formatting::IndentStyle::Spaces,
 		const_json::Formatting::IndentSize{4}
