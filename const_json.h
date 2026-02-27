@@ -336,12 +336,12 @@ namespace const_json {
 		template <class L, class R> requires (is_array_or_object<L> or L::token == JsonTokens::Variant) and (is_array_or_object<R> or R::token == JsonTokens::Variant)
 		struct compare_rettype<L, R> {
 			template <class... RArgs>
-			struct _dummy : std::bool_constant<L::helper::template set_symmetric_difference_pack<compare_rettype, typename R::helper>::value::size == 0> {};//std::bool_constant<all_of<L::helper::template contains<compare_rettype, RArgs>::value...>> {};
+			struct _dummy : std::bool_constant<L::_helper::template set_symmetric_difference_pack<compare_rettype, typename R::_helper>::value::size == 0> {};//std::bool_constant<all_of<L::helper::template contains<compare_rettype, RArgs>::value...>> {};
 
 			template <class... LArgs>
 			struct _dummy2 {};
 
-			static constexpr bool value = (L::token == R::token) and (0 == L::helper::template set_symmetric_difference_pack<compare_rettype, typename R::helper>::value::size);
+			static constexpr bool value = (L::token == R::token) and (0 == L::_helper::template set_symmetric_difference_pack<compare_rettype, typename R::_helper>::value::size);
 		};
 
 		template <typename T> requires util::is_const_json_type<T>
@@ -892,11 +892,11 @@ namespace const_json {
 		static constexpr auto name = _name.toStringView();
 		static_assert(name.size() > 1, "Variant name cannot be empty, if you are using this in an Array, don't. Just add more types to the Array.");
 
-		using helper = util::tppack<Ts...>;
+		using _helper = util::tppack<Ts...>;
 
-		using deduped = helper::template unique<util::compare_rettype>;
+		using _deduped = typename _helper::template unique<util::compare_rettype>::value;
 
-		using rettype = typename util::build_rettype<typename deduped::value>::value_variant;
+		using rettype = typename util::build_rettype<_deduped>::value_variant;
 		static constexpr JsonTokens token = JsonTokens::Variant;
 		static constexpr bool isOptional = false;
 
@@ -920,7 +920,7 @@ namespace const_json {
 		template <util::StringLiteral memberName>
 		using get = typename _get_impl<memberName>::value;
 
-		static inline util::ReadFunction_t<rettype> readFunctions[sizeof...(Ts)] = { Ts::template read<rettype>... };
+		static inline util::ReadFunction_t<rettype> _readFunctions[sizeof...(Ts)] = { Ts::template read<rettype>... };
 
 		template <typename _Variant> requires std::is_same_v<_Variant, rettype> or util::variant_that_contains_type_v<_Variant, rettype>
 		static void read(_Variant& out, std::basic_istream<chartype>& is) {
@@ -928,7 +928,7 @@ namespace const_json {
 			rettype rt;
 			bool result = false;
 			for (size_t i = 0; i < sizeof...(Ts); i++) {
-				auto func = readFunctions[i];
+				auto func = _readFunctions[i];
 				try {
 					func(rt, is);
 				}
@@ -952,7 +952,7 @@ namespace const_json {
 
 		template <Formatting fmt, int depth>
 		static void write(const rettype& r, std::basic_ostream<chartype>& os) {
-			using write_func_struct = util::build_variant_write_func<fmt, depth, typename deduped::value>;
+			using write_func_struct = util::build_variant_write_func<fmt, depth, _deduped>;
 			write_func_struct::template write<rettype>(r, os);
 		}
 	};
@@ -963,38 +963,24 @@ namespace const_json {
 		static constexpr auto name = _name.toStringView();
 		static constexpr JsonTokens token = JsonTokens::Object;
 		// This is necessary because the compiler won't accept an Object as a class template parameter due to the StringLiteral
-		using helper = util::tppack<Ts...>;
+		using _helper = util::tppack<Ts...>;
 
-		using deduped = helper::template unique<util::compare_rettype>;
-		using rettype = std::map<std::basic_string<chartype>, typename util::build_rettype<typename deduped::value>::value>;
+		using _deduped = typename _helper::template unique<util::compare_rettype>::value;
+		using rettype = std::map<std::basic_string<chartype>, typename util::build_rettype<_deduped>::value>;
 		using rettype_value_type = typename rettype::value_type::second_type;
-		using element_schema = std::conditional_t<(deduped::value::size > 1), Variant<"element", Ts...>, typename deduped::value::template at<0>::value>;
+		using element_schema = std::conditional_t<(_deduped::size > 1), Variant<"element", Ts...>, typename _deduped::template at<0>::value>;
 		static constexpr bool isOptional = false;
 
-		static inline util::ReadFunction_t<rettype_value_type> readFunctions[sizeof...(Ts)] = { Ts::template read<rettype_value_type>... };
-		static inline std::basic_string_view<chartype> memberNames[sizeof...(Ts)] = { Ts::name... };		
+		static inline util::ReadFunction_t<rettype_value_type> _readFunctions[sizeof...(Ts)] = { Ts::template read<rettype_value_type>... };
+		static inline std::basic_string_view<chartype> _memberNames[sizeof...(Ts)] = { Ts::name... };		
 
-		static constexpr size_t biggestMemberNameSize = util::max<size_t>({ Ts::name.size()... });
+		static constexpr size_t _biggestMemberNameSize = util::max<size_t>({ Ts::name.size()... });
 
 		template <util::StringLiteral nameToTest>
 		static constexpr bool contains_name = util::any_of<(Ts::name == nameToTest.toStringView())...>;
 
-		template <util::StringLiteral name> requires (contains_name<name>)
-		struct _get_impl {
-			template <class T, class... Ts2>
-			struct _impl { using value = typename _impl<Ts2...>::value; };
-
-			template <class T, class... Ts2> requires (T::name == name.toStringView())
-			struct _impl<T, Ts2...> { using value = T; };
-
-			template <class T>
-			struct _impl<T> { using value = T; };
-
-			using value = typename _impl<Ts...>::value;
-		};
-
-		template <util::StringLiteral memberName>
-		using get = typename _get_impl<memberName>::value;
+		template <util::StringLiteral name> requires(contains_name<name>)
+		using get = Variant<"temp", Ts...>::template get<name>;
 
 		template <util::StringLiteral memberName>
 		using get_member_rettype = util::get_rettype<typename get<memberName>::value>;
@@ -1023,7 +1009,7 @@ namespace const_json {
 				}
 
 				std::basic_string<chartype> memberName;
-				memberName.reserve(biggestMemberNameSize);
+				memberName.reserve(_biggestMemberNameSize);
 
 				is >> c;
 				while (is and c != '"') {
@@ -1044,14 +1030,14 @@ namespace const_json {
 
 				size_t index = 0;
 
-				if (memberName.size() > biggestMemberNameSize) {
+				if (memberName.size() > _biggestMemberNameSize) {
 					util::skipValue(is);
 					goto ReadObjectLoopEnd;
 				}
 				memberName.shrink_to_fit();
 
 				for (; index < sizeof...(Ts); index++) {
-					if (memberNames[index] == memberName)
+					if (_memberNames[index] == memberName)
 						break;
 				}
 				if (index == sizeof...(Ts)) {
@@ -1061,7 +1047,7 @@ namespace const_json {
 
 				try {
 					rettype_value_type v;
-					readFunctions[index](v, is);
+					_readFunctions[index](v, is);
 
 					memberChecklist[index] = true;
 					o[memberName] = v;
@@ -1088,7 +1074,7 @@ namespace const_json {
 			decltype(err::NotAllMembersPresentError::membersAbsent) members;
 			for (size_t i = 0; i < sizeof...(Ts); i++) {
 				if (!memberChecklist[i]) [[unlikely]] {
-					members.push_back(memberNames[i]);
+					members.push_back(_memberNames[i]);
 				}
 			}
 			if (members.size()) [[unlikely]] {
@@ -1124,7 +1110,7 @@ namespace const_json {
 					os << ' ';
 				}
 
-				using write_func_struct = util::build_variant_write_func<fmt, depth + 1, typename deduped::value>;
+				using write_func_struct = util::build_variant_write_func<fmt, depth + 1, _deduped>;
 				write_func_struct::template write<decltype(it->second)>(it->second, os);
 			}
 			if constexpr (util::is_formatting_enabled<fmt>) {
@@ -1143,14 +1129,14 @@ namespace const_json {
 	struct Array {
 		static constexpr auto name = _name.toStringView();
 		static constexpr JsonTokens token = JsonTokens::Array;
-		using helper = util::tppack<Ts...>;
+		using _helper = util::tppack<Ts...>;
 
-		using deduped = helper::template unique<util::compare_rettype>;
-		using rettype = std::vector<typename util::build_rettype<typename deduped::value>::value>;
-		using element_schema = std::conditional_t<(deduped::value::size > 1), Variant<"element", Ts...>, typename deduped::value::template at<0>::value>;
+		using _deduped = typename _helper::template unique<util::compare_rettype>::value;
+		using rettype = std::vector<typename util::build_rettype<_deduped>::value>;
+		using element_schema = std::conditional_t<(_deduped::size > 1), Variant<"element", Ts...>, typename _deduped::template at<0>::value>;
 		static constexpr bool isOptional = false;
 
-		static inline util::ReadFunction_t<typename rettype::value_type> readFunctions[sizeof...(Ts)] = { Ts::template read<typename rettype::value_type>... };
+		static inline util::ReadFunction_t<typename rettype::value_type> _readFunctions[sizeof...(Ts)] = { Ts::template read<typename rettype::value_type>... };
 
 		template <typename T> requires std::is_same_v<T, rettype> or std::is_assignable_v<T, rettype>
 		static void read(T& out, std::basic_istream<chartype>& is) {
@@ -1175,7 +1161,7 @@ namespace const_json {
 				typename rettype::value_type v;
 				for (size_t i = 0; i < sizeof...(Ts); i++) {
 					try {
-						auto func = readFunctions[i];
+						auto func = _readFunctions[i];
 						func(v, is);
 						result = true;
 						break;
@@ -1224,7 +1210,7 @@ namespace const_json {
 
 				util::indent<fmt, depth + 1>(os);
 
-				using write_func_struct = util::build_variant_write_func<fmt, depth + 1, typename deduped::value>;
+				using write_func_struct = util::build_variant_write_func<fmt, depth + 1, _deduped>;
 				write_func_struct::template write<typename rettype::value_type>(*it, os);
 			}
 			if constexpr (util::is_formatting_enabled<fmt>) {
