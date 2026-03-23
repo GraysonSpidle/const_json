@@ -181,10 +181,10 @@ namespace const_json {
 		};
 
 		template <typename T>
-		constexpr bool is_array_or_object = T::token == JsonTokens::Array or T::token == JsonTokens::Object;
+		constexpr bool is_array_or_object = false;
 
-		template <template <typename...> class Template, typename... Ts>
-		constexpr bool is_array_or_object<Template<Ts...>> = false; // this is always false because the compiler won't ever use this template if we have a StringLiteral present
+		template <typename T> requires util::is_const_json_type<T>
+		constexpr bool is_array_or_object<T> = T::token == JsonTokens::Array or T::token == JsonTokens::Object;
 
 		template <template <class, class> class Comparator, class... Ts>
 		struct as_predicate {
@@ -842,8 +842,8 @@ namespace const_json {
 
 		template <class _> requires (util::is_array_or_object<T> or (T::token == JsonTokens::Variant))
 		struct _get_helpers<_> {
-			using helper = typename T::helper;
-			using deduped = typename T::deduped;
+			using helper = typename T::_helper;
+			using deduped = typename T::_deduped;
 		};
 
 		using helper = typename _get_helpers<void>::helper;
