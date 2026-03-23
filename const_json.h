@@ -110,31 +110,16 @@ namespace const_json {
 			}
 
 			constexpr std::basic_string_view<chartype> toStringView() const {
+				// Yes it has to be a string_view; no you cannot plug this into an std::string and expect the string to be there at compile time.
 				return std::basic_string_view<chartype>(str, N - 1);
 			}
 
 			constexpr bool isEmpty() const {
+				// Funnily enough, N can NEVER be 0 (even if I remove the requires at the struct template)
+				// With string literals, there is always a null char appended to them so even a blank string will have at least 1 char in it.
 				return N == 1;
 			}
 		};
-
-		/*
-		// This version was better for debugging since the IDE and compiler would be able to tell you what the name was instead of listing the char values.
-		// But this version is less flexible to chartype changes, requiring loads of refactoring.
-		// Also this version would cause linker errors if you didn't have optimizations turned on
-		struct StringLiteral {
-			const chartype* const ptr;
-			size_t size;
-
-			template <size_t N>
-			consteval StringLiteral(const chartype(&chars)[N]) : ptr(chars), size(N) {}
-
-			constexpr bool isEmpty() const { return size == 1; } // size can never be 0 due to how the compiler handles string literals
-
-			constexpr std::basic_string_view<chartype> toStringView() const {
-				return std::basic_string_view<chartype>(ptr, size - 1);
-			}
-		};*/
 
 		template <bool b, bool... Bs>
 		static constexpr bool any_of = b or any_of<Bs...>;
@@ -196,10 +181,10 @@ namespace const_json {
 		};
 
 		template <typename T>
-		static constexpr bool is_array_or_object = T::token == JsonTokens::Array or T::token == JsonTokens::Object;
+		constexpr bool is_array_or_object = T::token == JsonTokens::Array or T::token == JsonTokens::Object;
 
 		template <template <typename...> class Template, typename... Ts>
-		static constexpr bool is_array_or_object<Template<Ts...>> = false; // this is always false because the compiler won't ever use this template if we have a StringLiteral present
+		constexpr bool is_array_or_object<Template<Ts...>> = false; // this is always false because the compiler won't ever use this template if we have a StringLiteral present
 
 		template <template <class, class> class Comparator, class... Ts>
 		struct as_predicate {
@@ -513,39 +498,39 @@ namespace const_json {
 		};
 
 		template <Formatting, int, typename>
-		struct build_variant_write_func {};
+		struct build_variant_write_func {/* Left intentionally blank in an attempt to make the error clearer */};
 
 		// std::variant only has 1 alternative
-		template <Formatting fmt, int depth, template <util::is_const_json_type...> class Template, util::is_const_json_type T>
-		struct build_variant_write_func<fmt, depth, Template<T>> {
+		template <Formatting fmt, int depth, template <util::is_const_json_type...> class Template, util::is_const_json_type Alternative>
+		struct build_variant_write_func<fmt, depth, Template<Alternative>> {
 			template <typename rettype> requires (!util::specialization_of<std::variant, rettype>)
 			static void write(const rettype& toBeWritten, std::basic_ostream<chartype>& os) {
-				T::template write<fmt, depth>(toBeWritten, os);
+				Alternative::template write<fmt, depth>(toBeWritten, os);
 			}
 
 			template <typename rettype> requires util::specialization_of<std::variant, rettype> and (std::variant_size_v<rettype> == 1)
 			static void write(const rettype& toBeWritten, std::basic_ostream<chartype>& os) {
 				auto v = std::get<std::variant_alternative_t<0, rettype>>(toBeWritten);
-				T::template write<fmt, depth>(v, os);
+				Alternative::template write<fmt, depth>(v, os);
 			}
 		};
 
 		// std::variant has 2+ alternatives
-		template <Formatting fmt, int depth, template <util::is_const_json_type...> class Template, util::is_const_json_type... Ts> requires (sizeof...(Ts) > 1)
-		struct build_variant_write_func<fmt, depth, Template<Ts...>> {
-			template <class... Ts2>
-			struct basic_visitor_t : Ts2... {
-				using Ts2::operator()...;
+		template <Formatting fmt, int depth, template <util::is_const_json_type...> class Template, util::is_const_json_type... Alternatives> requires (sizeof...(Alternatives) > 1)
+		struct build_variant_write_func<fmt, depth, Template<Alternatives...>> {
+			template <class... Ts>
+			struct basic_visitor_t : Ts... {
+				using Ts::operator()...;
 			};
-
-			template <class... Ts2>
-			basic_visitor_t(Ts2...) -> basic_visitor_t<Ts2...>;
+			// I don't think this deduction guide is needed as of C++20, but I'm going to keep this here anyway.
+			template <class... Ts>
+			basic_visitor_t(Ts...) -> basic_visitor_t<Ts...>;
 
 			template <class rettype> requires util::specialization_of<std::variant, rettype>
 			static void write(const rettype& toBeWritten, std::basic_ostream<chartype>& os) {
 				basic_visitor_t visitor {
 					// Yeah that's right, pack expansion with lambdas baby!
-					[&](const util::get_rettype<Ts>& r2) -> void { Ts::template write<fmt, depth>(r2, os); }...
+					[&](const util::get_rettype<Alternatives>& r2) -> void { Alternatives::template write<fmt, depth>(r2, os); }...
 				};
 				std::visit(visitor, toBeWritten);
 			}
@@ -567,7 +552,7 @@ namespace const_json {
 		}
 	}
 
-	// Yields the schema of the member located at the end of the path specified by memberNames.
+	// Yields the schema of the member located at the end of the path specified by memberNames. The output is in a member type alias called 'value'.
 	template <util::is_const_json_type RootSchema, util::StringLiteral... memberNames> requires (RootSchema::token == JsonTokens::Object or RootSchema::token == JsonTokens::Variant) and (0 < sizeof...(memberNames))
 	struct get_member_schema {
 		template <util::is_const_json_type Schema, util::StringLiteral memberName, util::StringLiteral... theRest>
@@ -588,6 +573,14 @@ namespace const_json {
 	using get_member_schema_t = typename get_member_schema<RootSchema, memberNames...>::value;
 
 	namespace util {
+		/* We're implementing the getMember() function here, but we must do it in an unorthodox way because
+		* of how I've chosen to approach the implementation. The easiest (and cleanest imo) implementation
+		* is a recursive one. Unfortunately, C++ templated functions are not as flexible as templeted structs.
+		* The functionality of making a specialization going from
+		* template <RootSchema, memberName, additionalMemberNames...> to template <RootSchema memberName> is
+		* not available to templated functions.
+		*/
+		
 		template <is_const_json_type RootSchema, StringLiteral memberName, StringLiteral... additionalMemberNames>
 		struct build_member_getter {
 			using rettype = typename get_member_schema<RootSchema, memberName, additionalMemberNames...>::value::rettype;
@@ -968,6 +961,7 @@ namespace const_json {
 		using _deduped = typename _helper::template unique<util::compare_rettype>::value;
 		using rettype = std::map<std::basic_string<chartype>, typename util::build_rettype<_deduped>::value>;
 		using rettype_value_type = typename rettype::value_type::second_type;
+		// Schema for the data type stored by the Object
 		using element_schema = std::conditional_t<(_deduped::size > 1), Variant<"element", Ts...>, typename _deduped::template at<0>::value>;
 		static constexpr bool isOptional = false;
 
@@ -1133,6 +1127,7 @@ namespace const_json {
 
 		using _deduped = typename _helper::template unique<util::compare_rettype>::value;
 		using rettype = std::vector<typename util::build_rettype<_deduped>::value>;
+		// Schema for the data type stored by the Array
 		using element_schema = std::conditional_t<(_deduped::size > 1), Variant<"element", Ts...>, typename _deduped::template at<0>::value>;
 		static constexpr bool isOptional = false;
 
