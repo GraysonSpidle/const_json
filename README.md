@@ -21,6 +21,11 @@ Tested compilers: msvc
 Additionally, I have included a python script that will convert a sample JSON output into a schema that you can copy and paste into your C++ code.
 It isn't of the highest quality, but it's better than nothing.
 
+> [!Note]
+> If you wish to print the names of the expected type (when a `BadTypeError` occurs)
+> then you will likely need to use an unmangler. This isn't 100% necessary for the full
+> functionality of the library, but it is something you should note.
+
 ## Example
 Here's a code example:
 ```c++
@@ -103,7 +108,7 @@ int main() {
 	};
 
 	std::ostringstream oss;
-	oss << std::fixed;
+	oss << std::fixed; // If you don't use something like this then your floats will come out as ints
 
 	const_json::dump<JsonSchema, fmt>(v2, oss);
 	
