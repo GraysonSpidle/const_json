@@ -777,12 +777,13 @@ namespace const_json {
 		size_t binarySearch(uintmax_t hashes[N], uintmax_t toFind) {
 			size_t begin = 0, end = N;
 			while (begin <= end) {
-				if (hashes[(begin + end) / 2] == toFind)
-					return hashes[(begin + end) / 2];
-				if (hashes[(begin + end) / 2] < toFind)
-					end = (begin + end) / 2 - 1;
-				else if (hashes[(begin + end) / 2] > toFind)
-					begin = (begin + end) / 2 + 1;
+				size_t middle = begin + (end - begin) / 2;
+				if (hashes[middle] == toFind)
+					return middle;
+				if (hashes[middle] < toFind)
+					begin = middle + 1;
+				else if (hashes[middle] > toFind)
+					end = middle - 1;
 			}
 			return N;
 		}
