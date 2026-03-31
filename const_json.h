@@ -6,6 +6,14 @@
 #ifndef __SPIDLE_CONST_JSON_H__
 #define __SPIDLE_CONST_JSON_H__
 
+#ifdef CONST_JSON_HASHING_ENABLE
+#pragma message("const_json: Object member name hashing enabled.")
+#ifndef CONST_JSON_HASHING_MEMBER_SIZE_CUTOFF
+#pragma message("const_json: Object member size cutoff for hashing defaulted to 4")
+#define CONST_JSON_HASHING_MEMBER_SIZE_CUTOFF 4
+#endif // CONST_JSON_HASHING_MEMBER_SIZE_CUTOFF
+#endif // CONST_JSON_HASHING_ENABLE 
+
 #pragma warning(push)
 #pragma warning(disable: 4623 4626 5027) // tells you that a default constructor, assignment operator, move constructor were implicitly deleted
 #pragma warning(disable: 4710, justification: "sanity") // tells you something wasn't inlined
@@ -223,6 +231,87 @@ namespace const_json {
 				using value = typename _impl<Ts...>::value;
 			};
 
+			// Takes the first n elements and yields them in a new tppack. This is the opposite of skip.
+			template <size_t n> requires (n <= sizeof...(Ts))
+			struct take {
+				static_assert(n > 0);
+
+				template <class _>
+				struct _switcher;
+
+				template <class _> requires (0 < sizeof...(Ts))
+				struct _switcher<_> {
+					template <class T, class... Ts2>
+					struct _impl;
+
+					template <class T, class... Ts2> requires (n > sizeof...(Ts) - sizeof...(Ts2))
+					struct _impl<T, Ts2...> {
+						using value = typename tppack<T>::template chain_pack<typename _impl<Ts2...>::value>::value;
+					};
+
+					template <class T, class... Ts2> requires (n == sizeof...(Ts) - sizeof...(Ts2))
+					struct _impl<T, Ts2...> {
+						using value = tppack<T>;
+					};
+
+					template <class T>
+					struct _impl<T> {
+						using value = tppack<T>;
+					};
+
+					using value = typename _impl<Ts...>::value;
+				};
+
+				template <class _> requires (0 == sizeof...(Ts))
+				struct _switcher<_> {
+					using value = tppack<>;
+				};
+
+				using value = typename _switcher<void>::value;
+			};
+
+			template <>
+			struct take<0> { using value = tppack<>; };
+
+			// Discards the first n elements and yields the remaining elements in a new tppack. This is the opposite of take.
+			template <size_t n> requires (n <= sizeof...(Ts))
+			struct skip {
+				static_assert(n > 0);
+
+				template <class _>
+				struct _switcher;
+
+				template <class _> requires (0 < sizeof...(Ts))
+				struct _switcher<_> {
+					template <class T, class... Ts2>
+					struct _impl;
+
+					template <class T, class... Ts2> requires (n > sizeof...(Ts) - sizeof...(Ts2))
+					struct _impl<T, Ts2...> {
+						using value = typename _impl<Ts2...>::value;
+					};
+
+					template <class T, class... Ts2> requires (n == sizeof...(Ts) - sizeof...(Ts2))
+					struct _impl<T, Ts2...> {
+						using value = tppack<Ts2...>;
+					};
+
+					template <class T>
+					struct _impl<T> {
+						using value = tppack<>;
+					};
+
+					using value = typename _impl<Ts...>::value;
+				};
+
+				template <class _> requires (0 == sizeof...(Ts))
+				struct _switcher<_> {
+					using value = tppack<>;
+				};
+
+				using value = typename _switcher<void>::value;
+			};
+
 			template <template <class> class Predicate>
 			struct filter {
 				template <class T, class... Ts2>
@@ -312,6 +401,68 @@ namespace const_json {
 				using _impl = set_symmetric_difference<Comparator, Ts2...>;
 
 				using value = typename Pack::template pipe_to<_impl>::value;
+			};
+
+			template <template <class, class> class Comparator>
+			struct sort {
+				template <class, class>
+				struct _merge;
+
+				template <class LSlice, class RSlice> requires (LSlice::size > 0 and RSlice::size > 0)
+				struct _merge<LSlice, RSlice> {
+					using L = typename LSlice::template at<0>::value;
+					using R = typename RSlice::template at<0>::value;
+
+					template <class, class>
+					struct _switcher;
+
+					template <class Left, class Right> requires (Comparator<Left, Right>::value)
+					struct _switcher<Left, Right> {
+						using _sliced = typename LSlice::template skip<1>::value;
+						using value = typename tppack<Left>::template chain_pack<typename _merge<_sliced, RSlice>::value>::value;
+					};
+
+					template <class Left, class Right> requires (!Comparator<Left, Right>::value)
+					struct _switcher<Left, Right> {
+						using _sliced = typename RSlice::template skip<1>::value;
+						using value = typename tppack<Right>::template chain_pack<typename _merge<LSlice, _sliced>::value>::value;
+					};
+
+					using value = typename _switcher<L, R>::value;
+				};
+
+				template <class LSlice, class RSlice> requires (LSlice::size > 0 and RSlice::size == 0)
+				struct _merge<LSlice, RSlice> {
+					using value = LSlice;
+				};
+
+				template <class LSlice, class RSlice> requires (LSlice::size == 0 and RSlice::size > 0)
+				struct _merge<LSlice, RSlice> {
+					using value = RSlice;
+				};
+
+				template <class LSlice, class RSlice> requires (LSlice::size == 0 and RSlice::size == 0)
+				struct _merge<LSlice, RSlice> {
+					using value = tppack<>;
+				};
+
+				template <class Slice>
+				struct _impl {
+					static_assert(Slice::size > 0);
+
+
+					using left = typename _impl<typename Slice::template take<Slice::size / 2>::value>::value;
+					using right = typename _impl<typename Slice::template skip<Slice::size / 2>::value>::value;
+
+					using value = typename _merge<left, right>::value;
+				};
+
+				template <class Slice> requires (Slice::size <= 1)
+				struct _impl<Slice> {
+					using value = Slice;
+				};
+
+				using value = typename _impl<tppack<Ts...>>::value;
 			};
 		};
 
@@ -549,6 +700,91 @@ namespace const_json {
 					os << std::basic_string<chartype>(static_cast<size_t>(static_cast<intmax_t>(depth) * fmt.size.value), chartype(' '));
 				}
 			}
+		}
+
+		// Polynomial rolling hash function
+		template <class T> requires (std::same_as<std::basic_string_view<chartype>, T> or std::same_as<std::basic_string<chartype>, T>)
+		constexpr uintmax_t polyRollHashString(const T& str, unsigned int exponentBase, uintmax_t moduloNum) {
+			uintmax_t out = 0;
+			uintmax_t pow = 1;
+			for (auto it = std::cbegin(str); it != std::cend(str); ++it) {
+				out += (uintmax_t)(*it) * pow;
+				pow *= exponentBase;
+			}
+			return out % moduloNum;
+		}
+
+		template <is_const_json_type... Ts>
+		consteval unsigned int bruteForceExponentBase(unsigned int start, uintmax_t moduloNum) {
+			uintmax_t hashes[sizeof...(Ts)];
+			std::basic_string_view<chartype> memberNames[sizeof...(Ts)] = { Ts::name... };
+
+			bool result = true;
+			unsigned int out = (start == 0 ? 1 : start);
+			// Assignment is intended
+			while ((result = out < std::numeric_limits<decltype(out)>::max())) {
+				for (uintmax_t i = 0; i < sizeof...(Ts); i++) {
+					hashes[i] = polyRollHashString(memberNames[i], out, moduloNum);
+
+					for (decltype(i) k = 0; k < i; k++) {
+						if (hashes[k] == hashes[i]) {
+							result = false;
+							break;
+						}
+					}
+					
+					if (!result) {
+						break;
+					}
+				}
+
+				if (result)
+					break;
+
+				out++;
+			}
+
+			return out * bool(result);
+		};
+
+		template <is_const_json_type... Ts>
+		struct build_perfect_hash {
+#ifdef CONST_JSON_HASHING_ENABLE
+			static constexpr uintmax_t _moduloNum = (sizeof(uintmax_t) >= 8 ? (1ull << 61) - 1 : (1ull << 31) - 1);
+			static constexpr unsigned int _exponentBase = bruteForceExponentBase<Ts...>(1, _moduloNum);
+			static constexpr bool success = _exponentBase != 0;
+
+			template <is_const_json_type Left, is_const_json_type Right>
+			struct _sort_comparator {
+				static constexpr bool value = polyRollHashString(Left::name, _exponentBase, _moduloNum) < polyRollHashString(Right::name, _exponentBase, _moduloNum);
+			};
+
+			// Sorted by their names' hash value
+			using sorted_Ts = typename tppack<Ts...>::template sort<_sort_comparator>::value;
+
+			template <class StringOrView>
+			static uintmax_t hash(const StringOrView& s) {
+				return polyRollHashString(s, _exponentBase, _moduloNum);
+			}
+#else
+			static constexpr uintmax_t _moduloNum = 1
+			static constexpr unsigned int _exponentBase = 1
+			static constexpr bool success = false;
+#endif // CONST_JSON_HASHING_ENABLE
+		};
+
+		template <size_t N>
+		size_t binarySearch(uintmax_t hashes[N], uintmax_t toFind) {
+			size_t begin = 0, end = N;
+			while (begin <= end) {
+				if (hashes[(begin + end) / 2] == toFind)
+					return hashes[(begin + end) / 2];
+				if (hashes[(begin + end) / 2] < toFind)
+					end = (begin + end) / 2 - 1;
+				else if (hashes[(begin + end) / 2] > toFind)
+					begin = (begin + end) / 2 + 1;
+			}
+			return N;
 		}
 	}
 
@@ -965,9 +1201,21 @@ namespace const_json {
 		using element_schema = std::conditional_t<(_deduped::size > 1), Variant<"element", Ts...>, typename _deduped::template at<0>::value>;
 		static constexpr bool isOptional = false;
 
-		static inline util::ReadFunction_t<rettype_value_type> _readFunctions[sizeof...(Ts)] = { Ts::template read<rettype_value_type>... };
-		static inline std::basic_string_view<chartype> _memberNames[sizeof...(Ts)] = { Ts::name... };		
+		using _hash_vars = util::build_perfect_hash<Ts...>;
 
+		template <class... Ts2>
+		struct _guts {
+			static inline util::ReadFunction_t<rettype_value_type> readFunctions[sizeof...(Ts2)] = { Ts2::template read<rettype_value_type>... };
+			static inline std::basic_string_view<chartype> memberNames[sizeof...(Ts2)] = { Ts2::name... };
+			static inline uintmax_t memberNameHashes[sizeof...(Ts2)] = { (_hash_vars::success ? util::polyRollHashString(Ts2::name, _hash_vars::_exponentBase, _hash_vars::_moduloNum) : 0)... };
+			static inline bool sampleMemberChecklist[sizeof...(Ts2)] = { Ts2::isOptional... };
+		};
+
+		using _our_guts = std::conditional_t<(_hash_vars::success), typename _hash_vars::sorted_Ts::template pipe_to<_guts>, _guts<Ts...>>;
+
+		static inline util::ReadFunction_t<rettype_value_type> _readFunctions[sizeof...(Ts)] = { Ts::template read<rettype_value_type>... };
+		static inline std::basic_string_view<chartype> _memberNames[sizeof...(Ts)] = { Ts::name... };	
+		
 		static constexpr size_t _biggestMemberNameSize = util::max<size_t>({ Ts::name.size()... });
 
 		template <util::StringLiteral nameToTest>
@@ -981,8 +1229,11 @@ namespace const_json {
 
 		template <typename T> requires std::is_same_v<T, rettype> or std::is_assignable_v<T, rettype>
 		static void read(T& out, std::basic_istream<chartype>& is) {
-			bool memberChecklist[sizeof...(Ts)] = { Ts::isOptional... }; // hopefully this gets optimized into a bitset
-
+			bool memberChecklist[sizeof...(Ts)];
+			for (size_t i = 0; i < sizeof...(Ts); i++) {
+				memberChecklist[i] = _our_guts::sampleMemberChecklist[i];
+			}
+			
 			std::streampos begin = is.tellg();
 
 			chartype c;
@@ -1029,11 +1280,20 @@ namespace const_json {
 					goto ReadObjectLoopEnd;
 				}
 				memberName.shrink_to_fit();
-
+				
+#ifdef CONST_JSON_HASHING_ENABLE
+				if constexpr (_hash_vars::success) {
+					index = util::binarySearch<sizeof...(Ts)>(_our_guts::memberNameHashes, _hash_vars::hash(memberName));
+					if (index != sizeof...(Ts) and _our_guts::memberNames[index] != memberName)
+						index = sizeof...(Ts);
+				}
+				else
+#endif // CONST_JSON_HASHING_ENABLE
 				for (; index < sizeof...(Ts); index++) {
-					if (_memberNames[index] == memberName)
+					if (_our_guts::memberNames[index] == memberName)
 						break;
 				}
+
 				if (index == sizeof...(Ts)) {
 					util::skipValue(is);
 					goto ReadObjectLoopEnd;
@@ -1041,7 +1301,7 @@ namespace const_json {
 
 				try {
 					rettype_value_type v;
-					_readFunctions[index](v, is);
+					_our_guts::readFunctions[index](v, is);
 
 					memberChecklist[index] = true;
 					o[memberName] = v;
@@ -1068,7 +1328,7 @@ namespace const_json {
 			decltype(err::NotAllMembersPresentError::membersAbsent) members;
 			for (size_t i = 0; i < sizeof...(Ts); i++) {
 				if (!memberChecklist[i]) [[unlikely]] {
-					members.push_back(_memberNames[i]);
+					members.push_back(_our_guts::memberNames[i]);
 				}
 			}
 			if (members.size()) [[unlikely]] {
