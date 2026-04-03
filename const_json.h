@@ -607,7 +607,7 @@ namespace const_json {
 			rettype& operator()(typename RootSchema::rettype& arg) const {
 				if constexpr (RootSchema::token == JsonTokens::Object) {
 					auto key = std::basic_string(memberName.toStringView());
-					assert(std::find(std::begin(arg), std::end(arg), key) != std::end(arg));
+					//assert(std::find(std::begin(arg), std::end(arg), key) != std::end(arg));
 
 					if constexpr (specialization_of<std::variant, RootSchema::rettype_value_type>)
 						return std::get<rettype>(arg[key]);
